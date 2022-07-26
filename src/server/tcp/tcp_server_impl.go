@@ -1,12 +1,12 @@
 package tcp
 
 import (
-    "encoding/json"
-    "fmt"
-    "log"
-    "net"
-    "searchEngine/src/server"
-    "searchEngine/src/server/protocol"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"searchEngine/src/server"
+	"searchEngine/src/server/protocol"
 )
 
 type responseData struct {
@@ -81,16 +81,27 @@ func (s *tcpServer) Start(arg ...interface{}) error {
                     log.Printf("error during read: %s", err)
                     break
                 }
-                currentDataLength := s.protoParser.Input(recvBuffer[:n])
-                if currentDataLength <= 0 {
-                    dataBuffer = append(dataBuffer, recvBuffer...)
+                markIndex := s.protoParser.Input(recvBuffer[:n])
+                dataBuffer = append(dataBuffer, recvBuffer[:n]...)
+                if markIndex <= 0 {
                     log.Print("data not complete, continue to read...")
+                    if len(dataBuffer) > maxPakcageLen {
+                        log.Printf("error data, length is too long. len: %d", markIndex)
+                        break
+                    }
                     continue
-                } else if currentDataLength > 0 && currentDataLength < maxPakcageLen {
+                } else if markIndex > 0 && markIndex < maxPakcageLen {
                     packedData, remainData, err := s.protoParser.Package(dataBuffer)
                     if err != nil {
-                        onMessage(s.callback, packedData)
+                        log.Printf("package data error: %v", err.Error())
+                        dataBuffer = nil
+                        remainData = nil
+                        continue
                     }
+
+                    log.Printf("dataBuffer: %v", string(dataBuffer) )
+                    log.Printf("remainData: %v", string(remainData) )
+                    onMessage(s.callback, packedData)
 
                     if len(remainData) > 0 {
                         dataBuffer = remainData
@@ -99,7 +110,7 @@ func (s *tcpServer) Start(arg ...interface{}) error {
                     }
 
                 } else {
-                    log.Printf("error data, length is too long. len: %d", currentDataLength)
+                    log.Printf("error data, length is too long. len: %d", markIndex)
                     break
                 }
 
@@ -136,6 +147,7 @@ func (s *tcpServer) IsReady() bool {
 }
 
 func onMessage(cbArr []server.CallbackInf, packedDatas [][]byte) {
+    log.Printf("onMessage receive: %v message", len(packedDatas))
     for _, packedData := range packedDatas {
         for _, cb := range cbArr {
             cb.Accept(packedData)

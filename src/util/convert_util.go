@@ -1,0 +1,9 @@
+package util
+
+import "encoding/binary"
+
+func ConvertIntToByte(id uint64) []byte {
+    b := make([]byte, 8)
+    binary.BigEndian.PutUint64(b, id)
+    return b
+}

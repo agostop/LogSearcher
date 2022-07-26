@@ -6,13 +6,13 @@ import (
 	"os"
 	"searchEngine/src/db"
 	"searchEngine/src/util"
+	"strconv"
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
 )
 
 type logMessage struct {
-    Id string `json:"id"`
     Container string `json:"container"`
     Timestamp msgDate `json:"timestamp"`
     Message string `json:"message"`
@@ -55,15 +55,21 @@ func NewIndexerInstance(basePath string) (*Indexer, error) {
 
 func (s *Indexer) Accept(data []byte) error {
     msg := &logMessage{}
-    
     if err := json.Unmarshal(data, msg); err != nil {
         log.Printf("unmarshal receive data error: %s", err.Error())
         log.Printf("origin data: %s", string(data))
         return err
     }
 
-    msg.Id = snowflakeGen.Generate().String()
-    s.Save(msg)
+    id := snowflakeGen.Generate()
+    s.indexer.Index(id.String(), msg)
+    s.ldb.Put(id.Bytes(), data)
+    log.Printf("save success. msg: %s", id.String())
+
+    _, err := s.Search("syslog")
+    if err != nil {
+        log.Printf("search got error: %v", err.Error())
+    }
 
     return nil
 }
@@ -100,12 +106,18 @@ func (s *Indexer) Search(text string) ([]string, error) {
         return nil, err
     }
     log.Print("search result: ", searchResults)
+    dmc := searchResults.Hits
+    for _, v := range dmc {
+        id := v.ID
+        i, err2 := strconv.ParseInt(id, 10, 64)
+        if err2 != nil {
+            log.Printf("got error. %s", err2.Error())
+            return nil, err2
+        }
+        b, _ := s.ldb.Get(util.ConvertIntToByte(uint64(i)))
+        log.Printf("===========data is: %v", string(b))
+    }
     return nil, nil
-}
-
-func (s *Indexer) Save(msg *logMessage) {
-    s.indexer.Index(msg.Id, msg)
-    log.Printf("save success. msg: %s", msg.Id)
 }
 
 func openPathIfExists(path string) (bleve.Index, error) {
@@ -125,8 +137,6 @@ func openPathIfExists(path string) (bleve.Index, error) {
 }
 
 func makeNewBleve(path string) (bleve.Index, error) {
-    id := bleve.NewTextFieldMapping()
-    id.Store = false
     container := bleve.NewTextFieldMapping()
     container.Store = false
     time := bleve.NewDateTimeFieldMapping()
@@ -135,7 +145,6 @@ func makeNewBleve(path string) (bleve.Index, error) {
     message.Store = false
 
     docMapping := bleve.NewDocumentMapping()
-    docMapping.AddFieldMappingsAt("id", id)
     docMapping.AddFieldMappingsAt("container", container)
     docMapping.AddFieldMappingsAt("timestamp", time)
     docMapping.AddFieldMappingsAt("message", message)
