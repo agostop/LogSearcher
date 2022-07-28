@@ -63,7 +63,7 @@ func (s *Indexer) Accept(data []byte) error {
 
     id := snowflakeGen.Generate()
     s.indexer.Index(id.String(), msg)
-    s.ldb.Put(id.Bytes(), data)
+    s.ldb.Put(util.ConvertIntToByte(uint64(id.Int64())), data)
     log.Printf("save success. msg: %s", id.String())
 
     _, err := s.Search("syslog")
@@ -114,7 +114,11 @@ func (s *Indexer) Search(text string) ([]string, error) {
             log.Printf("got error. %s", err2.Error())
             return nil, err2
         }
-        b, _ := s.ldb.Get(util.ConvertIntToByte(uint64(i)))
+        b, e := s.ldb.Get(util.ConvertIntToByte(uint64(i)))
+        if e != nil {
+            log.Printf("ldb get error. %v", e.Error())
+        }
+
         log.Printf("===========data is: %v", string(b))
     }
     return nil, nil
