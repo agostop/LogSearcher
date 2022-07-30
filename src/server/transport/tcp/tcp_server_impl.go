@@ -5,29 +5,18 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"searchEngine/src/server"
-	"searchEngine/src/server/protocol"
+    "searchEngine/src/server/common"
+	"searchEngine/src/server/transport"
+	"searchEngine/src/server/transport/protocol"
 )
-
-type responseData struct {
-    Msg  string
-    Code int
-}
 
 func init() {
     theServer := &tcpServer{}
-
-    if err := theServer.Config("0.0.0.0", 10010); err != nil {
-        log.Printf("config error, %s", err.Error())
-        return
-    }
-
-    server.ServerFactoryIns.Register("tcp", theServer)
-
+    common.TransServerFactoryIns.Register("tcp", theServer)
 }
 
 var (
-    succMsg, _ = json.Marshal(&responseData{
+    succMsg, _ = json.Marshal(&common.ResponseData{
         Msg:  "ok",
         Code: 0,
     })
@@ -37,7 +26,7 @@ var (
 type tcpServer struct {
     address     string
     port        int
-    callback    []server.CallbackInf
+    callback    []transport.CallbackInf
     ready       bool
     protoParser protocol.ProtoInf
 }
@@ -59,8 +48,8 @@ func (s *tcpServer) Start(arg ...interface{}) error {
 
     s.ready = true
 
+    log.Printf("transport server listen on %v:%v", s.address, s.port)
     for {
-        log.Printf("listen to accept new message.")
         conn, err := t.AcceptTCP()
 
         if err != nil {
@@ -138,7 +127,7 @@ func (s *tcpServer) Config(arg ...interface{}) error {
     return nil
 }
 
-func (s *tcpServer) AddCallback(cb ...server.CallbackInf) {
+func (s *tcpServer) AddCallback(cb ...transport.CallbackInf) {
     s.callback = cb
 }
 
@@ -146,7 +135,7 @@ func (s *tcpServer) IsReady() bool {
     return s.ready
 }
 
-func onMessage(cbArr []server.CallbackInf, packedDatas [][]byte) {
+func onMessage(cbArr []transport.CallbackInf, packedDatas [][]byte) {
     log.Printf("onMessage receive: %v message", len(packedDatas))
     for _, packedData := range packedDatas {
         for _, cb := range cbArr {

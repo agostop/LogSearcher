@@ -1,7 +1,7 @@
 package test
 
 import (
-	"searchEngine/src/server/protocol"
+	"searchEngine/src/server/transport/protocol"
 	"testing"
 )
 
@@ -26,6 +26,7 @@ func TestProtoOneLinePackage0(t *testing.T)  {
     if len(b2) > 0 {
         t.Errorf("remain data should be 0. but: %v", string(b2))
     }
+
 }
 
 func TestProtoOneLinePackage1(t *testing.T)  {

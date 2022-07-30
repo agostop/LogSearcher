@@ -32,7 +32,7 @@ func (o DelimiterProto) Package(data []byte) ([][]byte, []byte, error) {
         if i+1 > len(stringData) {
             break
         }
-        result = append(result, []byte(stringData[:i+1]))
+        result = append(result, []byte(stringData[:i]))
         stringData = stringData[i+1:]
     }
 

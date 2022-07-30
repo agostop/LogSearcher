@@ -6,32 +6,12 @@ import (
 	"os"
 	"searchEngine/src/db"
 	"searchEngine/src/util"
+    "searchEngine/src/server/common"
 	"strconv"
-	"time"
 
 	"github.com/blevesearch/bleve/v2"
 )
 
-type logMessage struct {
-    Container string `json:"container"`
-    Timestamp msgDate `json:"timestamp"`
-    Message string `json:"message"`
-}
-
-type msgDate time.Time
-
-func (m *msgDate) MarshalJSON() ([]byte, error)  {
-    return json.Marshal(time.Time(*m))
-}
-
-func (m *msgDate) UnmarshalJSON(b []byte) error {
-    now, err := time.ParseInLocation(`"`+timeFormat+`"`, string(b), time.Local)
-    if err != nil {
-        return err
-    }
-    *m = msgDate(now)
-    return nil
-}
 
 type Indexer struct {
     indexer bleve.Index
@@ -39,7 +19,6 @@ type Indexer struct {
 }
 
 var (
-    timeFormat = "2006-01-02 15:04:05"
     snowflakeGen, _ = util.NewNode(1)
 )
 
@@ -54,7 +33,7 @@ func NewIndexerInstance(basePath string) (*Indexer, error) {
 }
 
 func (s *Indexer) Accept(data []byte) error {
-    msg := &logMessage{}
+    msg := &common.LogMessage{}
     if err := json.Unmarshal(data, msg); err != nil {
         log.Printf("unmarshal receive data error: %s", err.Error())
         log.Printf("origin data: %s", string(data))
@@ -65,12 +44,6 @@ func (s *Indexer) Accept(data []byte) error {
     s.indexer.Index(id.String(), msg)
     s.ldb.Put(util.ConvertIntToByte(uint64(id.Int64())), data)
     log.Printf("save success. msg: %s", id.String())
-
-    _, err := s.Search("syslog")
-    if err != nil {
-        log.Printf("search got error: %v", err.Error())
-    }
-
     return nil
 }
 
@@ -107,6 +80,7 @@ func (s *Indexer) Search(text string) ([]string, error) {
     }
     log.Print("search result: ", searchResults)
     dmc := searchResults.Hits
+    var resultContents []string
     for _, v := range dmc {
         id := v.ID
         i, err2 := strconv.ParseInt(id, 10, 64)
@@ -119,9 +93,9 @@ func (s *Indexer) Search(text string) ([]string, error) {
             log.Printf("ldb get error. %v", e.Error())
         }
 
-        log.Printf("===========data is: %v", string(b))
+        resultContents = append(resultContents, string(b))
     }
-    return nil, nil
+    return resultContents, nil
 }
 
 func openPathIfExists(path string) (bleve.Index, error) {

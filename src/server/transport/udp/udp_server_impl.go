@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"searchEngine/src/server"
-	"searchEngine/src/server/protocol"
+
+    "searchEngine/src/server/common"
+	"searchEngine/src/server/transport"
+	"searchEngine/src/server/transport/protocol"
 )
 
-type responseData struct {
-    Msg  string
-    Code int
-}
+
 
 func init() {
     theServer := &udpServer{}
@@ -22,12 +21,12 @@ func init() {
         return
     }
 
-    server.ServerFactoryIns.Register("udp", theServer)
+    common.TransServerFactoryIns.Register("udp", theServer)
     
 }
 
 var (
-    succMsg, _ = json.Marshal(&responseData{
+    succMsg, _ = json.Marshal(&common.ResponseData{
         Msg:  "ok",
         Code: 0,
     })
@@ -36,7 +35,7 @@ var (
 type udpServer struct {
     address  string
     port     int
-    callback []server.CallbackInf
+    callback []transport.CallbackInf
     conn     *net.UDPConn
     ready    bool
     stop bool
@@ -99,7 +98,7 @@ func (s *udpServer) Config(arg ...interface{}) error {
     return nil
 }
 
-func (s *udpServer) AddCallback(cb ...server.CallbackInf) {
+func (s *udpServer) AddCallback(cb ...transport.CallbackInf) {
     s.callback = cb
 }
 
