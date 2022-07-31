@@ -34,7 +34,8 @@ func startSearchServer(s *Indexer) {
         Parameter: "search",
         SearchString: func(reqSearch string) ([]interface{}, error) {
             var resultArr []interface{}
-            result, err := s.Search(reqSearch)
+            containerName := "cwi_userservice"
+            result, err := s.Search(&containerName, &reqSearch, nil, nil)
             if err != nil {
                 return nil, err
             }

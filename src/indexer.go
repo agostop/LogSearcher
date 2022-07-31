@@ -2,16 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"searchEngine/src/db"
+	"searchEngine/src/server/common"
 	"searchEngine/src/util"
-    "searchEngine/src/server/common"
 	"strconv"
+	"time"
 
 	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/search/query"
 )
-
 
 type Indexer struct {
     indexer bleve.Index
@@ -19,7 +21,8 @@ type Indexer struct {
 }
 
 var (
-    snowflakeGen, _ = util.NewNode(1)
+    snowflakeGen, _  = util.NewNode(1)
+    containerNameKey = []byte("container")
 )
 
 func NewIndexerInstance(basePath string) (*Indexer, error) {
@@ -42,7 +45,9 @@ func (s *Indexer) Accept(data []byte) error {
 
     id := snowflakeGen.Generate()
     s.indexer.Index(id.String(), msg)
-    s.ldb.Put(util.ConvertIntToByte(uint64(id.Int64())), data)
+
+    s.saveToLevelDb(&id, msg)
+
     log.Printf("save success. msg: %s", id.String())
     return nil
 }
@@ -70,9 +75,25 @@ func (s *Indexer) InitBleveIndexer(arg ...interface{}) error {
     return nil
 }
 
-func (s *Indexer) Search(text string) ([]string, error) {
-    query := bleve.NewMatchQuery(text)
-    search := bleve.NewSearchRequest(query)
+func (s *Indexer) Search(containerName, searchText *string, start, end *time.Time) ([]string, error) {
+
+    if searchText == nil {
+        return nil, errors.New("except searchText, but not got it")
+    }
+
+    var conjunctionQuery *query.ConjunctionQuery
+
+    query := bleve.NewMatchQuery(*searchText)
+    query.SetField("message")
+    if containerName != nil {
+        containerQuery := bleve.NewMatchQuery(*containerName)
+        containerQuery.SetField("container")
+        conjunctionQuery = bleve.NewConjunctionQuery(query, containerQuery)
+    } else {
+        conjunctionQuery = bleve.NewConjunctionQuery(query)
+    }
+
+    search := bleve.NewSearchRequest(conjunctionQuery)
     searchResults, err := s.indexer.Search(search)
     if err != nil {
         log.Print("search error.")
@@ -98,6 +119,37 @@ func (s *Indexer) Search(text string) ([]string, error) {
     return resultContents, nil
 }
 
+func (s *Indexer) saveToLevelDb(id *util.ID, msg *common.LogMessage) error {
+    if id == nil {
+        return errors.New("must have ID parameter") 
+    }
+
+    if msg == nil {
+        return errors.New("must have msg parameter")
+    }
+
+    data, _ := json.Marshal(msg)
+    s.ldb.Put(util.ConvertIntToByte(uint64((*id).Int64())), data)
+    b, err := s.ldb.Get(containerNameKey)
+    if err != nil {
+        return err
+    }
+
+    var containers []string
+    if b != nil {
+        if err := json.Unmarshal(b, &containers); err != nil {
+            return err
+        }
+    }
+    containers = append(containers, msg.Container)
+    containersBytes, err := json.Marshal(containers)
+    if err != nil {
+        return err
+    }
+    s.ldb.Put(containerNameKey, containersBytes)
+    return nil
+}
+
 func openPathIfExists(path string) (bleve.Index, error) {
     _, err := os.Stat(path)
     if os.IsNotExist(err) {
@@ -111,7 +163,7 @@ func openPathIfExists(path string) (bleve.Index, error) {
         return nil, err
     }
 
-    return i, nil 
+    return i, nil
 }
 
 func makeNewBleve(path string) (bleve.Index, error) {
@@ -137,3 +189,5 @@ func makeNewBleve(path string) (bleve.Index, error) {
 
     return index, nil
 }
+
+
