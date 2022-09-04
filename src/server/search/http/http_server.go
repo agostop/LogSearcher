@@ -1,42 +1,43 @@
 package gin
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io/ioutil"
+    "log"
+    "net/http"
 
-	"searchEngine/src/server/common"
-	"searchEngine/src/server/search"
+    "searchEngine/src/server/common"
+    "searchEngine/src/server/search"
 )
 
-func init()  {
-   http := &httpServer{}
-   common.SearchServerFactoryIns.Register("http", http)
+func init() {
+    http := &httpServer{}
+    common.SearchServerFactoryIns.Register("http", http)
 }
 
 type httpServer struct {
-    host string
-    port int
-    handleArray []search.UrlHandler
+    host        string
+    port        int
+    handleMap map[string]search.UrlHandler
 }
 
 func (s *httpServer) Config(args ...interface{}) error {
-    if len(args) < 1 {
-        log.Panicf("param error, except 2 got %d.", len(args))
-        return errors.New("parameter error.")
-    }
 
-    s.host = args[0].(string)
-    s.port = args[1].(int)
+    if len(args) > 1 {
+        s.host = args[0].(string)
+        s.port = args[1].(int)
+    }
 
     return nil
 }
 
 func (s *httpServer) AddHandle(f search.UrlHandler) {
-    s.handleArray = append(s.handleArray, f)
+    if s.handleMap == nil {
+        s.handleMap = make(map[string]search.UrlHandler)
+    }
+    s.handleMap[f.Url] = f
 }
 
 func (s *httpServer) Start(args ...interface{}) error {
@@ -45,49 +46,14 @@ func (s *httpServer) Start(args ...interface{}) error {
     }
 
     if s.port == 0 {
-        s.port = 8899;
+        s.port = 8899
     }
 
-    if len(s.handleArray) == 0 {
+    if len(s.handleMap) == 0 {
         return errors.New("not have any handle")
     }
 
-    for _, handleInst := range s.handleArray {
-        http.HandleFunc(handleInst.Url, func(resp http.ResponseWriter, req *http.Request) {
-            var searchResult []interface{}
-            var err error
-            if req.Method == "GET" {
-                parameterValue := req.URL.Query().Get(handleInst.Parameter)
-                searchResult, err = handleInst.SearchString(parameterValue)
-                if err != nil {
-                    responseError(resp, err)
-                    return
-                }
-            } else if req.Method == "POST" {
-                b, err := ioutil.ReadAll(req.Body)
-                if err != nil {
-                    log.Fatal(err)
-                    responseError(resp, err)
-                    return
-                }
-                m := make(map[string]string)
-                err = json.Unmarshal(b, &m)
-                if err != nil {
-                    responseError(resp, err)
-                    return
-                }
-                searchResult, err = handleInst.SearchString(m[handleInst.Parameter])
-                if err != nil {
-                    responseError(resp,err)
-                    return
-                }
-            } else {
-                responseError(resp, errors.New("not support method"))
-                return
-            }
-            responseSucc(resp, searchResult)
-        })
-    }
+    http.Handle("/", s)
 
     log.Printf("search server listen on %v:%v", s.host, s.port)
     err := http.ListenAndServe(fmt.Sprintf("%v:%v", s.host, s.port), nil)
@@ -100,19 +66,56 @@ func (s *httpServer) Start(args ...interface{}) error {
 
 }
 
+func (s *httpServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+    path := req.URL.Path
+    handle := s.handleMap[path]
+
+    var searchResult []interface{}
+    var err error
+
+    if handle.Method == "GET" {
+        var params []string
+        for _, p := range handle.ReqParam {
+            parameter := req.URL.Query().Get(p)
+            params = append(params, parameter)
+        }
+        searchResult, err = handle.GetHandleFunc(params)
+        if err != nil {
+            responseError(w, err)
+            return
+        }
+    } else if handle.Method == "POST" {
+        b, err := ioutil.ReadAll(req.Body)
+        if err != nil {
+            log.Fatal(err)
+            responseError(w, err)
+            return
+        }
+        searchResult, err = handle.PostHandleFunc(b)
+        if err != nil {
+            responseError(w, err)
+            return
+        }
+    } else {
+        responseError(w, errors.New("not support method"))
+        return
+    }
+    responseSucc(w, searchResult)
+}
+
+
 func responseSucc(resp http.ResponseWriter, searchResult []interface{}) {
     respData, _ := json.Marshal(&common.ResponseListData{
-        Msg: searchResult,
+        Msg:  searchResult,
         Code: 0,
     })
     resp.Header().Add("content-type", "application/json")
     resp.Write(respData)
 }
 
-
 func responseError(resp http.ResponseWriter, err error) {
     b, _ := json.Marshal(&common.ResponseData{
-        Msg: err.Error(),
+        Msg:  err.Error(),
         Code: -1,
     })
     resp.Header().Add("content-type", "application/json")

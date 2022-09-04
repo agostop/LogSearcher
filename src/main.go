@@ -10,6 +10,13 @@ import (
 	_ "searchEngine/src/server/transport/tcp"
 )
 
+type searchReqBody struct {
+    ContainerName string         `json:"containerName"`
+    SearchText    string         `json:"searchText"`
+    StartTime     int64 `json:"startTime"`
+    EndTime       int64 `json:"endTime"`
+}
+
 func main() {
     s, err := NewIndexerInstance("./bin")
     if err != nil {
@@ -28,32 +35,16 @@ func startSearchServer(s *Indexer) {
         log.Fatal("search server not found")
         return
     }
+
     http.Config("0.0.0.0", 9008)
-    http.AddHandle(search.UrlHandler{
-        Url: "/v1/search",
-        Parameter: "search",
-        SearchString: func(reqSearch string) ([]interface{}, error) {
-            var resultArr []interface{}
-            containerName := "cwi_userservice"
-            result, err := s.Search(&containerName, &reqSearch, nil, nil)
-            if err != nil {
-                return nil, err
-            }
-            msg := &common.LogMessage{}
-            for _, v := range result {
-                if err := json.Unmarshal([]byte(v), msg); err != nil {
-                    return nil, err
-                }
-                resultArr = append(resultArr, msg)
-            }
-            return resultArr, nil
-        },
-    })
+    http.AddHandle(searchMessage(s))
+    http.AddHandle(getAllContainer(s))
     http.Start()
 
 }
 
-func startTransportServer(s *Indexer)  {
+
+func startTransportServer(s *Indexer) {
     serv := common.TransServerFactoryIns.GetServer("tcp")
     if serv == nil {
         log.Print("server not found.")
@@ -69,6 +60,57 @@ func startTransportServer(s *Indexer)  {
     serv.SetProto(protoParser)
     serv.AddCallback(s)
     serv.Start()
+}
+
+func searchMessage(s *Indexer) search.UrlHandler {
+    body := searchReqBody{}
+    return search.UrlHandler{
+        Url:     "/v1/search",
+        Method:  "POST",
+        ReqBody: &body,
+        PostHandleFunc: func(bodyBytes []byte) ([]interface{}, error) {
+            err := json.Unmarshal(bodyBytes, &body)
+            if err != nil {
+                return nil, err
+            }
+            var resultArr []interface{}
+            result, err := s.Search(body.ContainerName, body.SearchText, body.StartTime, body.EndTime)
+            if err != nil {
+                return nil, err
+            }
+            msg := &common.LogMessage{}
+            for _, v := range result {
+                if err := json.Unmarshal([]byte(v), msg); err != nil {
+                    return nil, err
+                }
+                resultArr = append(resultArr, *msg)
+            }
+            return resultArr, nil
+        },
+    }
+
+}
+
+func getAllContainer(s *Indexer) search.UrlHandler {
+    return search.UrlHandler{
+        Url:     "/v1/containers",
+        Method:  "GET",
+        ReqParam: nil,
+        GetHandleFunc: func(param ...interface{}) ([]interface{}, error) {
+            names, err := s.getAllContainerName()
+            if err != nil {
+                log.Printf("got container name failed: %v", err.Error())
+                return nil, err
+            }
+            var resultArr []interface{} 
+            for _, v := range names {
+                resultArr = append(resultArr, v)
+            }
+            return resultArr, nil
+        },
+    }
+
+
 }
 
 // func waitSigs() {

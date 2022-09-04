@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
-	"github.com/blevesearch/bleve/v2/search/query"
+	"github.com/blevesearch/bleve/v2/search"
 )
 
 type Indexer struct {
@@ -67,7 +67,7 @@ func (s *Indexer) InitBleveIndexer(arg ...interface{}) error {
 
     i, err := makeNewBleve(path)
     if err != nil {
-        return err
+        panic(err)
     }
 
     s.indexer = i
@@ -75,26 +75,46 @@ func (s *Indexer) InitBleveIndexer(arg ...interface{}) error {
     return nil
 }
 
-func (s *Indexer) Search(containerName, searchText *string, start, end *time.Time) ([]string, error) {
+func (s *Indexer) Search(containerName, searchText string, start, end int64) ([]string, error) {
+    isAllEmpty := 0
 
-    if searchText == nil {
-        return nil, errors.New("except searchText, but not got it")
-    }
-
-    var conjunctionQuery *query.ConjunctionQuery
-
-    query := bleve.NewMatchQuery(*searchText)
-    query.SetField("message")
-    if containerName != nil {
-        containerQuery := bleve.NewMatchQuery(*containerName)
-        containerQuery.SetField("container")
-        conjunctionQuery = bleve.NewConjunctionQuery(query, containerQuery)
+    conjunctionQuery := bleve.NewConjunctionQuery()
+    if len(searchText) > 0 {
+        query := bleve.NewMatchQuery(searchText)
+        query.SetField("message")
+        conjunctionQuery.AddQuery(query)
     } else {
-        conjunctionQuery = bleve.NewConjunctionQuery(query)
+        isAllEmpty++
     }
 
-    search := bleve.NewSearchRequest(conjunctionQuery)
-    searchResults, err := s.indexer.Search(search)
+
+    if len(containerName) > 0 {
+        containerQuery := bleve.NewMatchQuery(containerName)
+        containerQuery.SetField("container")
+        conjunctionQuery.AddQuery(containerQuery)
+    } else {
+        isAllEmpty++
+    }
+
+    if start > 0 && end > 0 {
+        startInc := true
+        endInc := true
+        dataRangeQuery := bleve.NewDateRangeInclusiveQuery(time.Unix(start, 0), time.Unix(end, 0), &startInc, &endInc)
+        dataRangeQuery.SetField("timestamp")
+        conjunctionQuery.AddQuery(dataRangeQuery)
+    } else {
+        isAllEmpty++
+    }
+
+    if isAllEmpty == 3 {
+        log.Print("all parameter is emtpy, return")
+        return nil, errors.New("parameter error")
+    }
+
+    searchReq := bleve.NewSearchRequest(conjunctionQuery)
+    searchReq.Size = 1000
+    searchReq.Sort = []search.SearchSort{ &search.SortDocID{ Desc: false } }
+    searchResults, err := s.indexer.Search(searchReq)
     if err != nil {
         log.Print("search error.")
         return nil, err
@@ -121,7 +141,7 @@ func (s *Indexer) Search(containerName, searchText *string, start, end *time.Tim
 
 func (s *Indexer) saveToLevelDb(id *util.ID, msg *common.LogMessage) error {
     if id == nil {
-        return errors.New("must have ID parameter") 
+        return errors.New("must have ID parameter")
     }
 
     if msg == nil {
@@ -135,19 +155,41 @@ func (s *Indexer) saveToLevelDb(id *util.ID, msg *common.LogMessage) error {
         return err
     }
 
-    var containers []string
+    containers := make(map[string]bool, 0)
     if b != nil {
         if err := json.Unmarshal(b, &containers); err != nil {
             return err
         }
     }
-    containers = append(containers, msg.Container)
+    containers[msg.Container] = true
     containersBytes, err := json.Marshal(containers)
     if err != nil {
         return err
     }
     s.ldb.Put(containerNameKey, containersBytes)
     return nil
+}
+
+func (s *Indexer) getAllContainerName() ([]string, error) {
+    b, err := s.ldb.Get(containerNameKey)
+    if err != nil {
+        return nil, err
+    }
+    if len(b) == 0 {
+        return []string{}, nil
+    }
+    nameMap := make(map[string]bool)
+    err = json.Unmarshal(b, &nameMap)
+    if err != nil {
+        return nil, err
+    }
+
+    names := make([]string, 0, len(nameMap))
+    for k := range nameMap {
+        names = append(names, k)
+    }
+
+    return names, nil
 }
 
 func openPathIfExists(path string) (bleve.Index, error) {
@@ -171,6 +213,7 @@ func makeNewBleve(path string) (bleve.Index, error) {
     container.Store = false
     time := bleve.NewDateTimeFieldMapping()
     time.Store = false
+    // time.DateFormat = "date_parser"
     message := bleve.NewTextFieldMapping()
     message.Store = false
 
@@ -180,6 +223,13 @@ func makeNewBleve(path string) (bleve.Index, error) {
     docMapping.AddFieldMappingsAt("message", message)
 
     indexMapping := bleve.NewIndexMapping()
+    indexMapping.DefaultDateTimeParser = "logTimeParser"
+    // indexMapping.AddCustomDateTimeParser("date_parser", map[string]interface{}{
+    //     "type": "logTimeParser",
+    //     "layouts": []interface{}{
+    //         common.TimeFormat,
+    //     },
+    // })
     indexMapping.AddDocumentMapping("log", docMapping)
     index, err := bleve.New(path, indexMapping)
     if err != nil {
@@ -189,5 +239,3 @@ func makeNewBleve(path string) (bleve.Index, error) {
 
     return index, nil
 }
-
-

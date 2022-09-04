@@ -8,6 +8,9 @@ type DataSearchServer interface {
 
 type UrlHandler struct {
     Url string
-    Parameter string
-    SearchString func(string) ([]interface{}, error)
+    Method string
+    ReqBody interface{}
+    ReqParam []string
+    GetHandleFunc func(parameter ...interface{}) ([]interface{}, error)
+    PostHandleFunc func(body []byte) ([]interface{}, error)
 }
